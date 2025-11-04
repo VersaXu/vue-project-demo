@@ -19,12 +19,17 @@ interface TurtleSoupGame {
   question: string
   answer: string
   hint: string
+  clues?: string[]
+  difficulty?: 'easy' | 'medium' | 'hard'
+  category?: string
 }
 
 interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   timestamp: number
+  isLoading?: boolean
+  messageId?: string
 }
 
 let turtleSoupStore: ReturnType<typeof useTurtleSoupStore> | null = null
@@ -156,7 +161,6 @@ const startNewGame = async (preserveChatHistory = false, useKnowledgeBase = true
     return puzzle
   }
 }
-
 /**
  * 向AI提问
  *
@@ -168,131 +172,244 @@ const askQuestion = async (question: string) => {
   if (!store.currentGame) return null
 
   try {
-    // 记录提问
-    store.recordQuestion()
+    // 立即添加用户问题到聊天历史，显示加载状态
+    const userMessage = { role: 'user' as const, content: question, timestamp: Date.now() }
+    chatHistory.value.push(userMessage)
+    
+    // 添加加载中的AI消息
+    const loadingMessageId = Date.now().toString()
+    const loadingMessage = {
+      role: 'assistant' as const,
+      content: '🤔 AI思考中...',
+      timestamp: Date.now(),
+      isLoading: true,
+      messageId: loadingMessageId
+    }
+    chatHistory.value.push(loadingMessage)
 
     let answer: string
-
     if (checkApiConfig()) {
       // 使用API服务（传递更多上下文信息）
-      const userMessages = chatHistory.value.filter((msg) => msg.role === 'user')
-      const questionCount = userMessages.length + 1 // 当前是第几个问题
+      const userMessages = chatHistory.value.filter((msg) => msg.role === 'user' && !msg.isLoading)
+      const questionCount = userMessages.length
 
-      // 提取最近的用户提问作为聊天历史上下文
-      const recentHistory = chatHistory.value.slice(-10).map((msg) => `${msg.role}: ${msg.content}`)
+      // 检查是否需要提供直接线索（连续3次无关回答）
+      let directClue = ''
+      if (store.currentSession && store.currentSession.unrelatedQuestions >= 3) {
+        directClue = `\n\n💡 直接线索：${store.currentGame.hint}`
+        store.currentSession.unrelatedQuestions = 0 // 重置计数器
+      }
 
-      answer = await turtleSoupApiService.askQuestion(
+      // 提取完整的聊天历史上下文（排除加载消息）
+      const fullHistory = chatHistory.value
+        .filter(msg => !msg.isLoading)
+        .slice(-20)
+        .map((msg) => `${msg.role}: ${msg.content}`)
+
+      const apiResponse = await turtleSoupApiService.askQuestion(
         question,
         store.currentGame.question,
         store.currentGame.answer,
-        recentHistory,
+        fullHistory,
         questionCount,
+        directClue
       )
 
-      // 检查是否回答正确（包含"回答正确"关键词）
-      if (answer.includes('回答正确')) {
-        // 标记游戏为已解决
+      // 检查是否应该结束游戏
+      if (apiResponse.includes('🎉 回答正确！')) {
         markAsSolved()
-        // 添加正确答案到聊天记录
-        chatHistory.value.push({
-          role: 'assistant',
-          content: answer,
-          timestamp: Date.now(),
-        })
-        // 返回特殊标记，让前端知道这是正确答案
-        return `CORRECT_ANSWER:${answer}`
+        answer = apiResponse
+      } else {
+        answer = apiResponse
       }
     } else {
-      // 使用本地逻辑（简化版）
-      answer = simulateAnswer(question, store.currentGame)
+      // 使用大模型API进行准确判断
+      try {
+        // 构建完整的对话上下文
+        const conversationContext = chatHistory.value
+          .filter(msg => !msg.isLoading)
+          .slice(-10)
+          .map(msg => `${msg.role === 'user' ? '玩家' : '系统'}: ${msg.content}`)
+          .join('\n')
+
+        // 调用大模型API进行准确判断
+        const judgment = await callLargeModelForJudgment(
+          store.currentGame.question,
+          store.currentGame.answer,
+          question,
+          conversationContext
+        )
+        
+        answer = judgment.response
+        
+        // 检查是否应该结束游戏
+        if (judgment.shouldEndGame) {
+          markAsSolved()
+          return `🎉 回答正确！\n\n汤底：${store.currentGame.answer}\n\n提示：${store.currentGame.hint}`
+        }
+        
+        // 处理线索建议和自动提示
+        if (store.currentSession) {
+          // 添加自动线索（基于提问次数）
+          const autoHint = provideAutoHint(store.currentSession, store.currentGame)
+          if (autoHint) {
+            answer += autoHint
+          }
+          
+          // 处理大模型建议的线索
+          if (judgment.hintSuggestion && store.currentGame.clues && store.currentGame.clues.length > 0) {
+            const hintIndex = Math.min(
+              Math.floor(store.currentSession.unrelatedQuestions / 2),
+              store.currentGame.clues.length - 1
+            )
+            answer += `\n\n💡 智能提示：${store.currentGame.clues[hintIndex]}`
+          }
+        }
+      } catch (apiError) {
+        console.warn('大模型API调用失败，使用备用逻辑:', apiError)
+        // API调用失败时使用改进的本地逻辑
+        answer = improvedSimulateAnswer(question, {
+          id: store.currentGame.id,
+          question: store.currentGame.question,
+          answer: store.currentGame.answer,
+          hint: store.currentGame.hint,
+          clues: store.currentGame.clues || []
+        })
+      }
     }
 
-    // 检查是否是正确答案标记
-    if (answer.startsWith('CORRECT_ANSWER:')) {
-      const actualAnswer = answer.replace('CORRECT_ANSWER:', '')
-      // 添加上下文
-      gameContext.value.push(`玩家提问：${question}`, `系统回答：${actualAnswer}`)
-
-      // 更新对话历史
-      chatHistory.value.push(
-        { role: 'user', content: question, timestamp: Date.now() },
-        { role: 'assistant', content: actualAnswer, timestamp: Date.now() },
-      )
-
-      return actualAnswer
+    // 移除加载消息
+    const loadingIndex = chatHistory.value.findIndex(msg => msg.messageId === loadingMessageId)
+    if (loadingIndex !== -1) {
+      chatHistory.value.splice(loadingIndex, 1)
     }
+
+    // 根据回答内容更新统计
+    const cleanAnswer = typeof answer === 'string' ? answer.split('\n')[0].trim() : '不是'
+    if (cleanAnswer === '是') {
+      store.recordQuestion('yes')
+    } else if (cleanAnswer === '没有关系') {
+      store.recordQuestion('irrelevant')
+    } else {
+      store.recordQuestion('no')
+    }
+
+    // 添加最终回答到聊天历史
+    const finalAnswer = {
+      role: 'assistant' as const,
+      content: answer,
+      timestamp: Date.now()
+    }
+    chatHistory.value.push(finalAnswer)
 
     // 添加上下文
     gameContext.value.push(`玩家提问：${question}`, `系统回答：${answer}`)
 
-    // 更新对话历史
-    chatHistory.value.push(
-      { role: 'user', content: question, timestamp: Date.now() },
-      { role: 'assistant', content: answer, timestamp: Date.now() },
-    )
-
     return answer
   } catch (error) {
     console.error('提问失败:', error)
-    const errorMessage = '无法获取AI回答，请重试或开始新游戏'
+    
+    // 移除加载消息
+    const loadingIndex = chatHistory.value.findIndex(msg => msg.isLoading)
+    if (loadingIndex !== -1) {
+      chatHistory.value.splice(loadingIndex, 1)
+    }
 
-    chatHistory.value.push(
-      { role: 'user', content: question, timestamp: Date.now() },
-      { role: 'assistant', content: errorMessage, timestamp: Date.now() },
-    )
+    const errorMessage = '无法获取AI回答，请重试或开始新游戏'
+    const errorAnswer = {
+      role: 'assistant' as const,
+      content: errorMessage,
+      timestamp: Date.now()
+    }
+    chatHistory.value.push(errorAnswer)
 
     return errorMessage
   }
 }
 
 /**
- * 模拟AI回答（当API不可用时使用）
+ * 调用大模型API进行准确判断
  */
-const simulateAnswer = (question: string, game: TurtleSoupGame): string => {
+const callLargeModelForJudgment = async (
+  puzzle: string,
+  answer: string,
+  question: string,
+  context: string
+): Promise<{response: string; shouldEndGame?: boolean; hintSuggestion?: string}> => {
+  // 这里应该调用实际的大模型API
+  // 由于API密钥配置检查，如果配置无效则使用改进的本地逻辑
+  if (!checkApiConfig()) {
+    return {
+      response: improvedSimulateAnswer(question, { question: puzzle, answer } as TurtleSoupGame)
+    }
+  }
+
+  // 实际API调用逻辑应该在turtleSoupApiService中实现
+  try {
+    const response = await turtleSoupApiService.judgeWithLargeModel(
+      puzzle,
+      answer,
+      question,
+      context
+    )
+    return response
+  } catch (error) {
+    console.warn('大模型API调用失败，使用改进的本地逻辑:', error)
+    return {
+      response: improvedSimulateAnswer(question, { question: puzzle, answer } as TurtleSoupGame)
+    }
+  }
+}
+
+/**
+ * 改进的模拟AI回答（当API不可用时使用）
+ */
+const improvedSimulateAnswer = (question: string, game: TurtleSoupGame): string => {
   const questionLower = question.toLowerCase()
   const answerLower = game.answer.toLowerCase()
 
-  // 扩展的关键词匹配逻辑
-  const keywords = [
-    '朋友',
-    '海',
-    '肉',
-    '按钮',
-    '身高',
-    '沙漠',
-    '包裹',
-    '敲门',
-    '盲人',
-    '牛排',
-    '大楼',
-    '兄弟',
-    '父亲',
-    '儿子',
-    '照片',
-    '房间',
-    '水',
-    '玻璃',
-    '雪',
-    '背包',
-    '桥',
-    '死亡',
-    '自杀',
-    '医院',
-    '味道',
-    '声音',
-    '跳伞',
-    '降落伞',
+  // 更精确的关键词匹配逻辑
+  const positiveKeywords = [
+    '朋友', '海', '肉', '按钮', '身高', '沙漠', '包裹', '敲门',
+    '盲人', '牛排', '大楼', '兄弟', '父亲', '儿子', '照片', '房间',
+    '水', '玻璃', '雪', '背包', '桥', '死亡', '自杀', '医院',
+    '味道', '声音', '跳伞', '降落伞', '圣诞老人', '礼物', '金鱼',
+    '鱼缸', '连体', '婴儿', '手术', '孕妇', '胎儿', '分娩'
   ]
 
-  for (const keyword of keywords) {
+  const negativeKeywords = [
+    '天气', '时间', '颜色', '大小', '多少', '哪里', '什么时候',
+    '为什么叫', '什么意思', '定义', '解释', '说明'
+  ]
+
+  // 检查正面关键词匹配
+  for (const keyword of positiveKeywords) {
     if (questionLower.includes(keyword) && answerLower.includes(keyword)) {
       return '是'
     }
   }
 
-  // 随机返回结果作为后备
-  const responses = ['是', '不是', '没有关系']
-  return responses[Math.floor(Math.random() * responses.length)]
+  // 检查负面关键词（通常表示无关问题）
+  for (const keyword of negativeKeywords) {
+    if (questionLower.includes(keyword)) {
+      return '没有关系'
+    }
+  }
+
+  // 基于问题长度的启发式判断
+  if (questionLower.length < 4) {
+    return '没有关系'
+  }
+
+  // 使用确定性算法而不是随机返回
+  // 基于问题哈希值生成确定性但看似随机的回答
+  const hash = questionLower.split('').reduce((acc, char) => {
+    return acc + char.charCodeAt(0)
+  }, 0)
+
+  // 70%概率返回"不是"，20%概率返回"没有关系"，10%概率返回"是"
+  const responses = ['不是', '不是', '不是', '不是', '不是', '不是', '不是', '没有关系', '没有关系', '是']
+  return responses[hash % responses.length]
 }
 
 const revealAnswer = () => {
@@ -323,7 +440,30 @@ const getHint = () => {
   const store = getTurtleSoupStore()
   if (!store.currentGame) return null
 
-  const hintContent = `💡 提示：${store.currentGame.hint}`
+  // 获取当前游戏会话
+  const session = store.currentSession
+  if (!session) return null
+
+  // 基于提问次数和无关问题数量计算线索级别
+  const totalQuestions = session.usefulQuestions + session.unrelatedQuestions
+  const hintLevel = Math.min(
+    Math.floor(totalQuestions / 2), // 每2个问题提升一级线索
+    store.currentGame.clues?.length || 1
+  )
+
+  // 获取对应的线索内容
+  let hintContent = ''
+  if (store.currentGame.clues && store.currentGame.clues.length > 0) {
+    hintContent = `💡 线索提示 (${hintLevel + 1}/${store.currentGame.clues.length + 1}):\n`
+    // 总是显示基础提示
+    hintContent += `- ${store.currentGame.hint}\n`
+    // 显示已解锁的线索
+    for (let i = 0; i <= hintLevel && i < store.currentGame.clues.length; i++) {
+      hintContent += `- ${store.currentGame.clues[i]}\n`
+    }
+  } else {
+    hintContent = `💡 提示：${store.currentGame.hint}`
+  }
 
   chatHistory.value.push({
     role: 'assistant',
@@ -331,7 +471,24 @@ const getHint = () => {
     timestamp: Date.now(),
   })
 
-  return store.currentGame.hint
+  return hintContent
+}
+
+/**
+ * 自动提供线索（在多次无关提问后）
+ */
+const provideAutoHint = (session: any, game: TurtleSoupGame): string => {
+  const totalQuestions = session.usefulQuestions + session.unrelatedQuestions
+  
+  // 在特定提问次数后自动提供线索
+  const hintTriggers = [3, 6, 9, 12] // 在第3、6、9、12个问题后提供线索
+  const triggerIndex = hintTriggers.findIndex(trigger => totalQuestions === trigger)
+  
+  if (triggerIndex !== -1 && game.clues && game.clues.length > triggerIndex) {
+    return `\n\n💡 自动线索：${game.clues[triggerIndex]}`
+  }
+  
+  return ''
 }
 
 /**
@@ -382,5 +539,7 @@ export const useTurtleSoup = () => {
     resetGame,
     getGameStats,
     gameStats: store.gameStats,
+    // 导出新的改进方法用于测试
+    improvedSimulateAnswer,
   }
 }

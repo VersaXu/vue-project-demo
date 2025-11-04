@@ -15,6 +15,8 @@ interface GameSession {
   endTime?: number
   questionsAsked: number
   solved: boolean
+  usefulQuestions: number
+  unrelatedQuestions: number
 }
 
 export const useTurtleSoupStore = defineStore('turtleSoup', () => {
@@ -34,15 +36,23 @@ export const useTurtleSoupStore = defineStore('turtleSoup', () => {
       puzzle,
       startTime: Date.now(),
       questionsAsked: 0,
-      solved: false
+      solved: false,
+      usefulQuestions: 0,
+      unrelatedQuestions: 0
     }
     gameStats.value.totalGames++
   }
 
-  const recordQuestion = () => {
+  const recordQuestion = (answerType: 'yes' | 'no' | 'irrelevant') => {
     if (currentSession.value) {
       currentSession.value.questionsAsked++
       gameStats.value.totalQuestions++
+      
+      if (answerType === 'yes') {
+        currentSession.value.usefulQuestions++
+      } else if (answerType === 'irrelevant') {
+        currentSession.value.unrelatedQuestions++
+      }
     }
   }
 

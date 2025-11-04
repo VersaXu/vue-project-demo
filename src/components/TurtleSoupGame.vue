@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, nextTick } from 'vue'
 import { useTurtleSoup } from '@/services/turtleSoupService'
+import { useTurtleSoupStore } from '@/stores/turtleSoupStore'
 
 const { currentGame, chatHistory, startNewGame, askQuestion, revealAnswer, getHint, resetGame } =
   useTurtleSoup()
@@ -9,6 +10,21 @@ const gameState = ref<'start' | 'playing' | 'ended'>('start')
 const currentQuestion = ref('')
 const isLoading = ref(false)
 const chatContainerRef = ref<HTMLDivElement>()
+
+// 计算进度百分比
+const progressPercentage = computed(() => {
+  const store = useTurtleSoupStore()
+  if (!store.currentSession) return 0
+  
+  // 基础进度基于有用问题数量
+  const baseProgress = store.currentSession.usefulQuestions * 15 // 每个有用问题增加15%
+  
+  // 减去无关问题的影响 (每个无关问题减少5%，但不低于0)
+  const penalty = store.currentSession.unrelatedQuestions * 5
+  const adjustedProgress = Math.max(0, baseProgress - penalty)
+  
+  return Math.min(adjustedProgress, 100)
+})
 
 // 计算属性：是否显示提示按钮（至少提问3次后）
 const showHintButton = computed(() => {
@@ -46,6 +62,13 @@ const submitQuestion = async () => {
   if (answer && answer.includes('🎉 回答正确！')) {
     // 自动切换到结束状态，就像用户点击了"查看答案"
     gameState.value = 'ended'
+  }
+  
+  // 检查是否包含直接线索
+  if (answer && answer.includes('💡 直接线索')) {
+    // 确保滚动到最新消息
+    await nextTick()
+    scrollToBottom()
   }
 }
 
@@ -94,15 +117,41 @@ const formatTime = (timestamp: number) => {
         <p class="subtitle">情境猜谜推理游戏</p>
       </div>
 
-      <div class="game-rules">
-        <h3>游戏规则</h3>
-        <ul>
-          <li>我会给你一个荒谬或难以理解的情境</li>
-          <li>你需要通过提问来找出背后的原因</li>
-          <li>我只能回答"是"、"不是"或"没有关系"</li>
-          <li>提问3次后可以获得提示</li>
-          <li>尽量用最少的提问找出正确答案</li>
-        </ul>
+      <div class="game-intro">
+        <div class="game-illustration">
+          <div class="turtle-icon">🐢</div>
+          <div class="soup-icon">🍲</div>
+        </div>
+        <h3>什么是海龟汤？</h3>
+        <p class="intro-text">
+          海龟汤是一种情境推理游戏，玩家需要通过提问来解开看似不合理的情境背后的真相。
+        </p>
+        
+        <div class="game-rules">
+          <h3>游戏规则</h3>
+          <div class="rules-grid">
+            <div class="rule-card">
+              <div class="rule-icon">❓</div>
+              <p>我会给你一个荒谬或难以理解的情境</p>
+            </div>
+            <div class="rule-card">
+              <div class="rule-icon">💭</div>
+              <p>你需要通过提问来找出背后的原因</p>
+            </div>
+            <div class="rule-card">
+              <div class="rule-icon">✅</div>
+              <p>我只能回答"是"、"不是"或"没有关系"</p>
+            </div>
+            <div class="rule-card">
+              <div class="rule-icon">💡</div>
+              <p>提问3次后可以获得提示</p>
+            </div>
+            <div class="rule-card">
+              <div class="rule-icon">🏆</div>
+              <p>尽量用最少的提问找出正确答案</p>
+            </div>
+          </div>
+        </div>
       </div>
 
       <button class="start-button" @click="startGame" :disabled="isLoading">
@@ -114,26 +163,52 @@ const formatTime = (timestamp: number) => {
     <div v-if="gameState === 'playing'" class="game-screen">
       <div class="game-header">
         <h2>🐢 海龟汤游戏进行中</h2>
-        <div class="game-controls">
-          <button v-if="showHintButton" class="hint-button" @click="requestHint" title="获取提示">
-            💡 提示
-          </button>
-          <button class="end-button" @click="endGame" title="查看答案">🔍 查看答案</button>
+        <div class="progress-container">
+          <div class="progress-info">
+            <span class="question-count">
+              🗨️ 提问次数: {{ chatHistory.filter(m => m.role === 'user').length }}
+            </span>
+            <div class="progress-bar">
+              <div 
+                class="progress-fill"
+                :style="{ width: progressPercentage + '%' }"
+              ></div>
+            </div>
+            <span class="progress-text">
+              进度: {{ progressPercentage }}%
+            </span>
+          </div>
+          <div class="game-controls">
+            <button v-if="showHintButton" class="hint-button" @click="requestHint" title="获取提示">
+              💡 提示
+            </button>
+            <button class="end-button" @click="endGame" title="查看答案">🔍 查看答案</button>
+          </div>
         </div>
       </div>
 
       <div ref="chatContainerRef" class="chat-container">
         <div
           v-for="(message, index) in chatHistory"
-          :key="index"
-          :class="['message', message.role]"
+          :key="message.messageId || index"
+          :class="['message', message.role, { loading: message.isLoading }]"
         >
           <div class="message-avatar">
             {{ message.role === 'user' ? '👤' : '🤖' }}
           </div>
           <div class="message-content">
-            <div class="message-text" v-html="formatMessage(message.content)"></div>
-            <div class="message-time">{{ formatTime(message.timestamp) }}</div>
+            <div v-if="message.isLoading" class="loading-message">
+              <div class="loading-dots">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
+              <div class="loading-text">{{ message.content }}</div>
+            </div>
+            <template v-else>
+              <div class="message-text" v-html="formatMessage(message.content)"></div>
+              <div class="message-time">{{ formatTime(message.timestamp) }}</div>
+            </template>
           </div>
         </div>
       </div>
@@ -199,6 +274,11 @@ const formatTime = (timestamp: number) => {
 .start-screen {
   text-align: center;
   padding: 40px 20px;
+  background: var(--color-background-soft);
+  border-radius: 15px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  margin: 20px auto;
+  max-width: 800px;
 }
 
 .game-header h1 {
@@ -246,11 +326,39 @@ const formatTime = (timestamp: number) => {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
   border: none;
-  padding: 12px 40px;
-  font-size: 1.1rem;
-  border-radius: 25px;
+  padding: 16px 50px;
+  font-size: 1.2rem;
+  border-radius: 30px;
   cursor: pointer;
-  transition: transform 0.2s;
+  transition: all 0.3s;
+  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+  position: relative;
+  overflow: hidden;
+}
+
+.start-button::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.2),
+    transparent
+  );
+  transition: 0.5s;
+}
+
+.start-button:hover::before {
+  left: 100%;
+}
+
+.start-button:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
 }
 
 .start-button:hover {
@@ -274,6 +382,48 @@ const formatTime = (timestamp: number) => {
   gap: 10px;
 }
 
+.progress-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 15px;
+}
+
+.progress-info {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  width: 100%;
+}
+
+.question-count {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.progress-bar {
+  flex-grow: 1;
+  height: 10px;
+  background: var(--color-background-soft);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea, #8e44ad);
+  border-radius: 5px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
 .hint-button,
 .end-button {
   padding: 8px 16px;
@@ -283,6 +433,48 @@ const formatTime = (timestamp: number) => {
   color: var(--color-text);
   cursor: pointer;
   transition: all 0.2s;
+}
+
+.progress-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 15px;
+}
+
+.progress-info {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  width: 100%;
+}
+
+.question-count {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+.progress-bar {
+  flex-grow: 1;
+  height: 10px;
+  background: var(--color-background-soft);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #667eea, #8e44ad);
+  border-radius: 5px;
+  transition: width 0.3s ease;
+}
+
+.progress-text {
+  font-size: 0.9rem;
+  color: var(--color-text);
+  white-space: nowrap;
 }
 
 .hint-button:hover {
@@ -355,6 +547,58 @@ const formatTime = (timestamp: number) => {
 .assistant .message-content {
   background: var(--color-background-soft);
   color: var(--color-text);
+}
+
+.message.loading .message-content {
+  background: rgba(102, 126, 234, 0.1);
+  border: 1px dashed #667eea;
+}
+
+.loading-message {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.loading-dots {
+  display: flex;
+  gap: 4px;
+}
+
+.loading-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #667eea;
+  animation: loadingDots 1.4s infinite ease-in-out both;
+}
+
+.loading-dots span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.loading-dots span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+.loading-dots span:nth-child(3) {
+  animation-delay: 0s;
+}
+
+@keyframes loadingDots {
+  0%, 80%, 100% {
+    transform: scale(0.8);
+    opacity: 0.5;
+  }
+  40% {
+    transform: scale(1.2);
+    opacity: 1;
+  }
+}
+
+.loading-text {
+  color: #667eea;
+  font-style: italic;
 }
 
 .message-text {

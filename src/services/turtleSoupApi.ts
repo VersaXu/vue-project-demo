@@ -76,12 +76,18 @@ class TurtleSoupApiService {
     puzzleAnswer: string,
     chatHistory: string[],
     questionCount: number,
+    directClue: string = ''
   ): Promise<string> {
     try {
       let prompt = `关于这个海龟汤谜题："${puzzleQuestion}"，玩家提问："${question}"。
 谜底答案："${puzzleAnswer}"
 
-请按照以下规则回答：`
+请严格按照以下规则回答：`
+
+      // 添加直接线索（如果有）
+      if (directClue) {
+        prompt += `\n\n额外线索：${directClue}`
+      }
 
       // 基础回答规则
       prompt += `
@@ -122,34 +128,95 @@ class TurtleSoupApiService {
       prompt += `\n\n请严格按照上述规则回答，不要提供额外解释。`
 
       const result = await this.sendChatMessage(prompt)
-      // 检查是否匹配答案
-      const answerLower = puzzleAnswer.toLowerCase()
-      const questionLower = question.toLowerCase()
-
-      // 简单的相似度检测（实际应用中可以使用更复杂的算法）
-      const similarityThreshold = 0.9
-      let similarity = 0
-
-      // 计算关键词匹配度
-      const answerWords = answerLower.split(/[，。！？、\s]+/).filter((word) => word.length > 1)
-      const questionWords = questionLower.split(/[，。！？、\s]+/).filter((word) => word.length > 1)
-
-      if (answerWords.length > 0) {
-        const matchedWords = questionWords.filter((qWord) =>
-          answerWords.some((aWord) => aWord.includes(qWord) || qWord.includes(aWord)),
-        )
-        similarity = matchedWords.length / Math.max(answerWords.length, questionWords.length)
+      
+      // 检查是否回答正确
+      if (result.includes('🎉 回答正确！')) {
+        return result
       }
 
-      // 如果相似度超过阈值，直接返回完整的正确答案（与查看答案一致）
-      if (similarity >= similarityThreshold) {
-        return `🎉 回答正确！\n\n汤底：${puzzleAnswer}\n\n提示：${'游戏结束，恭喜你猜对了！'}`
+      // 确保返回的是标准回答格式
+      const cleanResult = result.trim()
+      if (cleanResult === '是' || cleanResult === '不是' || cleanResult === '没有关系') {
+        return cleanResult
       }
 
-      return result
+      // 如果包含状态反馈，提取基础回答
+      if (cleanResult.includes('。')) {
+        const baseAnswer = cleanResult.split('。')[0]
+        if (baseAnswer === '是' || baseAnswer === '不是' || baseAnswer === '没有关系') {
+          return baseAnswer
+        }
+      }
+
+      // 默认返回"不是"
+      return '不是'
     } catch (error) {
       console.error('提问失败:', error)
       throw new Error('无法获取AI回答')
+    }
+  }
+
+  /**
+   * 使用大模型API进行准确判断
+   */
+  async judgeWithLargeModel(
+    puzzle: string,
+    answer: string,
+    question: string,
+    context: string
+  ): Promise<{response: string; shouldEndGame?: boolean}> {
+    try {
+      const prompt = `【海龟汤游戏高级判断任务】
+谜题：${puzzle}
+谜底：${answer}
+玩家提问：${question}
+
+对话上下文：
+${context}
+
+请执行以下判断任务：
+1. 相关性判断：
+   - 如果提问直接或间接与谜底相关，回答"是"
+   - 如果提问与谜底完全无关，回答"不是"
+   - 如果提问模糊不清，回答"没有关系"
+
+2. 游戏结束判断（仅在相关性为"是"时评估）：
+   - 如果提问内容与谜底匹配度≥90%，标记游戏应结束
+   - 评估标准：关键词匹配、逻辑一致性、解释完整性
+
+3. 线索提示建议（仅在相关性为"不是"或"没有关系"时评估）：
+   - 根据提问次数和当前进度，建议是否提供线索
+
+请返回JSON格式响应：
+{
+  "response": "是|不是|没有关系",
+  "shouldEndGame": boolean,
+  "hintSuggestion": string
+}`
+
+      const result = await this.sendChatMessage(prompt)
+      
+      try {
+        const parsed = JSON.parse(result)
+        return {
+          response: parsed.response || '不是',
+          shouldEndGame: parsed.shouldEndGame || false,
+          hintSuggestion: parsed.hintSuggestion || ''
+        }
+      } catch {
+        // 解析失败时回退到简单判断
+        const cleanResult = result.trim()
+        if (cleanResult.includes('🎉') || cleanResult.includes('回答正确')) {
+          return {response: '是', shouldEndGame: true}
+        }
+        if (cleanResult === '是' || cleanResult === '不是' || cleanResult === '没有关系') {
+          return {response: cleanResult}
+        }
+        return {response: '不是'}
+      }
+    } catch (error) {
+      console.error('大模型判断失败:', error)
+      return {response: '不是'}
     }
   }
 }
