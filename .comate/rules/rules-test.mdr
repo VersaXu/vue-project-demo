@@ -1,0 +1,118 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+
+## 项目概述
+
+这是一个用于处理异步迭代的工具库，提供了一系列用于处理异步数据流的工具和操作符。该项目主要解决了在JavaScript/TypeScript中处理异步数据流的复杂性问题，提供了简单易用的API。
+
+## 项目架构
+
+项目采用模块化设计，主要分为以下几个核心部分：
+
+1. **核心控制器** (`controller.ts`)
+
+   - 实现了 `AsyncIteratorController` 类
+   - 负责管理异步数据流的状态和控制
+   - 提供了数据的输入输出接口
+
+2. **工厂模块** (`factory/`)
+
+   - `array.ts`: 处理数组的异步迭代
+   - `event.ts`: 处理事件源的异步迭代
+   - `reader.ts`: 处理流读取器的异步迭代
+   - `stream.ts`: 处理Node.js流的异步迭代
+
+3. **辅助工具** (`helper/`)
+
+   - 提供了一系列操作符来处理异步迭代器
+   - 实现了链式调用API
+   - 包含多个独立的操作符实现
+
+4. **操作符** (`helper/operators/`)
+   - `chunk.ts`: 数据分块
+   - `debounce.ts`: 防抖处理
+   - `filter.ts`: 数据过滤
+   - `map.ts`: 数据转换
+   - `take.ts`: 取前N个元素
+   - `until.ts`: 条件终止
+
+## 代码结构说明
+
+### 1. 核心接口
+
+typescript
+interface OverAsyncIterator<T> extends AsyncIterable<T> {
+filter(predicate: Predicate<T>): OverAsyncIterator<T>;
+map<R>(transform: (value: T) => R): OverAsyncIterator<R>;
+chunk(size: number): OverAsyncIterator<T[]>;
+debounce(ms: number): OverAsyncIterator<T[]>;
+take(count: number): OverAsyncIterator<T>;
+until(predicate: Predicate<T>): OverAsyncIterator<T>;
+}
+
+### 2. 工厂函数
+
+项目提供了多个工厂函数来创建异步迭代器：
+
+- `fromIntervalEach`: 从数组创建带间隔的异步迭代器
+- `fromEvent`: 从事件源创建异步迭代器
+- `fromStreamReader`: 从流读取器创建异步迭代器
+- `fromStream`: 从Node.js流创建异步迭代器
+
+## 开发指南
+
+### 1. 基本开发流程
+
+1. 如需增加运算符，放置在`src/helper/operators`目录下。
+2. 所有运算符都要从`src/helper/index.ts`导出，并能够链式调用。
+3. 如果增加对流的消费、创建流的方式，放置在`src/factory`目录下。
+
+### 2. 扩展开发指南
+
+1. **添加新的工厂函数**
+
+   - 在 `factory/` 目录下创建新文件
+   - 实现相应的工厂函数
+   - 在 `index.ts` 中导出
+
+2. **添加新的操作符**
+   - 在 `helper/operators/` 目录下创建新文件
+   - 实现操作符函数
+   - 在 `helper/index.ts` 中添加到 `OverAsyncIterator` 接口
+   - 在 `over` 函数中实现新方法
+
+### 3. 测试规范
+
+- 所有功能都需要编写对应的单元测试
+- 测试文件放置在相应模块的 `__tests__` 目录下
+- 测试文件命名规则：`[功能名].test.ts`
+- 增加任何功能，都要运行单元测试，确保测试的行覆盖率在100%，分支覆盖率大于90%。
+
+## 代码风格指南
+
+1. **类型定义**
+
+   - 优先使用接口（interface）定义类型
+   - 为所有公开API提供完整的类型定义
+   - 使用泛型增加代码复用性
+
+2. **错误处理**
+
+   - 统一使用 Error 对象处理错误
+   - 在异步操作中正确处理错误传播
+
+3. **命名规范**
+   - 使用驼峰命名法
+   - 类名使用大驼峰
+   - 接口名清晰表达其用途
+
+## 注意事项
+
+1. 所有的异步操作都应该正确处理错误情况
+2. 注意内存泄漏，特别是在处理事件监听器时
+3. 在实现新功能时，确保与现有的接口保持一致
+4. 保持代码的可测试性，避免副作用
+5. 文档注释要清晰完整，包含参数说明和使用示例
