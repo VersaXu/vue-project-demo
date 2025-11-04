@@ -223,6 +223,7 @@ onUnmounted(() => {
           <RouterLink to="/user-data">User DashBoard</RouterLink>
           <RouterLink to="/snake-game">Snake Game</RouterLink>
           <RouterLink to="/flight-status">Flight Status</RouterLink>
+          <RouterLink to="/turtle-soup">Turtle Soup Game</RouterLink>
           <RouterLink to="/policy">Policy</RouterLink>
         </nav>
         <div class="user-info">
