@@ -71,6 +71,14 @@ npm run lint
 - `src/stores/`: Pinia stores
 - `src/config/`: Game configurations
 
+## Running views
+<img width="819" height="604" alt="image" src="https://github.com/user-attachments/assets/13f6281a-6a6f-4f11-9ae9-22fb4b59612e" />
+
+<img width="859" height="598" alt="image" src="https://github.com/user-attachments/assets/43bf380c-ad05-4a15-ae2d-f7563de3b6af" />
+
+<img width="754" height="572" alt="image" src="https://github.com/user-attachments/assets/cbbfbaa6-9d2f-43a2-8816-bfb4357a59d8" />
+
+
 ## License
 MIT License (see LICENSE file)
   
