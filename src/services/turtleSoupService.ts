@@ -367,8 +367,39 @@ const callLargeModelForJudgment = async (
 const improvedSimulateAnswer = (question: string, game: TurtleSoupGame): string => {
   const questionLower = question.toLowerCase()
   const answerLower = game.answer.toLowerCase()
+  const puzzleQuestionLower = game.question.toLowerCase()
+  
+  // 尝试检测用户是否在提供完整解释或猜测答案
+  // 不依赖特定关键词，而是检查语句长度和复杂度
+  // 通常猜测答案的句子会较长，包含多个子句或推理过程
+  if (questionLower.length > 20 && 
+      (questionLower.includes('，') || questionLower.includes('。') || 
+       questionLower.includes(',') || questionLower.includes('.') ||
+       questionLower.includes('是因为') || questionLower.includes('所以'))) {
+    
+    // 提取答案中的核心概念
+    const answerConcepts = extractCoreConcepts(answerLower);
+    
+    // 提取问题中的核心概念
+    const questionConcepts = extractCoreConcepts(questionLower);
+    
+    // 计算概念重叠
+    let conceptOverlap = 0;
+    for (const concept of answerConcepts) {
+      if (questionConcepts.some(qc => 
+          qc.includes(concept) || concept.includes(qc) || 
+          calculateSimilarity(concept, qc) > 0.7)) {
+        conceptOverlap++;
+      }
+    }
+    
+    // 如果有足够的概念重叠，可能是正确答案
+    if (conceptOverlap >= Math.max(1, Math.floor(answerConcepts.length * 0.25))) {
+      return '🎉 回答正确！\n\n汤底：' + game.answer + '\n\n提示：' + game.hint;
+    }
+  }
 
-  // 更精确的关键词匹配逻辑
+  // 更精确的关键词匹配逻辑 - 用于非猜测答案的常规问题
   const positiveKeywords = [
     '朋友', '海', '肉', '按钮', '身高', '沙漠', '包裹', '敲门',
     '盲人', '牛排', '大楼', '兄弟', '父亲', '儿子', '照片', '房间',
@@ -382,9 +413,16 @@ const improvedSimulateAnswer = (question: string, game: TurtleSoupGame): string 
     '为什么叫', '什么意思', '定义', '解释', '说明'
   ]
 
+  // 从谜题和答案中提取额外关键词
+  const puzzleSpecificKeywords = extractKeywords(puzzleQuestionLower);
+  const answerSpecificKeywords = extractKeywords(answerLower);
+  
+  // 将谜题特有关键词也加入正面关键词列表
+  const combinedPositiveKeywords = [...positiveKeywords, ...puzzleSpecificKeywords, ...answerSpecificKeywords];
+
   // 检查正面关键词匹配
-  for (const keyword of positiveKeywords) {
-    if (questionLower.includes(keyword) && answerLower.includes(keyword)) {
+  for (const keyword of combinedPositiveKeywords) {
+    if (questionLower.includes(keyword) && (answerLower.includes(keyword) || puzzleQuestionLower.includes(keyword))) {
       return '是'
     }
   }
@@ -410,6 +448,71 @@ const improvedSimulateAnswer = (question: string, game: TurtleSoupGame): string 
   // 70%概率返回"不是"，20%概率返回"没有关系"，10%概率返回"是"
   const responses = ['不是', '不是', '不是', '不是', '不是', '不是', '不是', '没有关系', '没有关系', '是']
   return responses[hash % responses.length]
+}
+
+/**
+ * 提取文本中的关键词
+ */
+function extractKeywords(text: string): string[] {
+  return text
+    .split(/\s+|，|。|！|？|,|\.|!|\?/)
+    .filter(word => word.length > 1)
+    .map(word => word.trim())
+    .filter(Boolean);
+}
+
+/**
+ * 提取文本中的核心概念（更复杂的处理）
+ */
+function extractCoreConcepts(text: string): string[] {
+  // 分割成句子
+  const sentences = text.split(/。|！|？|\.|!|\?/).filter(Boolean);
+  
+  // 从每个句子中提取名词短语和动词短语
+  const concepts: string[] = [];
+  
+  for (const sentence of sentences) {
+    // 分割成短语（通过逗号或分号）
+    const phrases = sentence.split(/，|,|；|;/).filter(Boolean);
+    
+    for (const phrase of phrases) {
+      // 清理并添加短语
+      const cleanPhrase = phrase.trim();
+      if (cleanPhrase.length > 1) {
+        concepts.push(cleanPhrase);
+      }
+      
+      // 提取2-3个字的词组（可能是核心名词或动词）
+      const words = cleanPhrase.match(/[\u4e00-\u9fa5]{2,3}/g) || [];
+      concepts.push(...words);
+    }
+  }
+  
+  // 去重
+  return [...new Set(concepts)];
+}
+
+/**
+ * 计算两个字符串的相似度（简化版）
+ */
+function calculateSimilarity(str1: string, str2: string): number {
+  if (!str1 || !str2) return 0;
+  
+  // 对于非常短的字符串，直接检查包含关系
+  if (str1.length <= 2 || str2.length <= 2) {
+    return str1.includes(str2) || str2.includes(str1) ? 1.0 : 0.0;
+  }
+  
+  // 计算重叠字符数
+  let overlap = 0;
+  for (const char of str1) {
+    if (str2.includes(char)) {
+      overlap++;
+    }
+  }
+  
+  // 返回相对于较短字符串长度的重叠比例
+  return overlap / Math.min(str1.length, str2.length);
 }
 
 const revealAnswer = () => {
