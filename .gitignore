@@ -28,3 +28,4 @@ coverage
 *.sw?
 
 *.tsbuildinfo
+turtle-soup-backend/.git

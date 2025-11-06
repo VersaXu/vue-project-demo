@@ -1,4 +1,4 @@
-import express from 'express'
+import express, { Request, Response, NextFunction } from 'express'
 import axios from 'axios'
 import cors from 'cors'
 import dotenv from 'dotenv'
@@ -15,25 +15,39 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization']
 }))
 
-// 处理预检请求
-app.options('*', cors())
-
 app.use(express.json())
 
+// 阿里云通义千问配置接口
+interface QwenConfig {
+  API_KEY: string
+  BASE_URL: string
+  MODEL: string
+}
+
 // 阿里云通义千问配置
-const QWEN_CONFIG = {
+const QWEN_CONFIG: QwenConfig = {
   API_KEY: process.env.QWEN_API_KEY || 'sk-446fc4f4977b4584a318ccc235cf2fd1',
   BASE_URL: process.env.QWEN_BASE_URL || 'https://dashscope.aliyuncs.com/compatible-mode/v1',
   MODEL: process.env.QWEN_MODEL || 'qwen-turbo',
 }
 
 // 健康检查端点
-app.get('/', (req, res) => {
+app.get('/', (req: Request, res: Response) => {
   res.send('海龟汤API服务正常运行')
 })
 
+// 聊天请求接口
+interface ChatRequest {
+  prompt: string
+}
+
+// 聊天响应接口  
+interface ChatResponse {
+  result: string
+}
+
 // 通义千问聊天API端点
-app.post('/api/qwen/chat', async (req, res) => {
+app.post('/api/qwen/chat', async (req: Request<{}, {}, ChatRequest>, res: Response<ChatResponse | { error: string }>) => {
   try {
     const { prompt } = req.body
 
@@ -64,14 +78,33 @@ app.post('/api/qwen/chat', async (req, res) => {
     const result = chatResponse.data.choices[0].message.content
     console.log('聊天响应:', result.substring(0, 100) + '...')
     res.json({ result })
-  } catch (error) {
+  } catch (error: any) {
     console.error('通义千问聊天请求失败:', error.response?.data || error.message)
     res.status(500).json({ error: '通义千问聊天请求失败' })
   }
 })
 
+// 登录请求接口
+interface LoginRequest {
+  username: string
+  password: string
+}
+
+// 用户信息接口
+interface UserInfo {
+  id: number
+  username: string
+  email: string
+}
+
+// 登录响应接口
+interface LoginResponse {
+  access_token: string
+  user: UserInfo
+}
+
 // 用户认证API端点 - 简化版，仅用于演示
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', (req: Request<{}, {}, LoginRequest>, res: Response<LoginResponse | { error: string }>) => {
   try {
     const { username, password } = req.body
     console.log('登录尝试:', username)
@@ -79,7 +112,7 @@ app.post('/api/auth/login', (req, res) => {
     // 简化的用户认证逻辑
     if (username && password) {
       const fakeToken = 'turtle-soup-token-' + Date.now()
-      const loginResponse = {
+      const loginResponse: LoginResponse = {
         access_token: fakeToken,
         user: {
           id: 1,
@@ -94,21 +127,33 @@ app.post('/api/auth/login', (req, res) => {
       console.log('登录失败: 用户名或密码为空')
       res.status(401).json({ error: '用户名或密码错误' })
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('登录请求失败:', error.message)
     res.status(500).json({ error: '登录请求失败' })
   }
 })
 
+// 注册请求接口
+interface RegisterRequest {
+  username: string
+  password: string
+}
+
+// 注册响应接口
+interface RegisterResponse {
+  access_token: string
+  user: UserInfo
+}
+
 // 用户注册API端点 - 简化版
-app.post('/api/auth/register', (req, res) => {
+app.post('/api/auth/register', (req: Request<{}, {}, RegisterRequest>, res: Response<RegisterResponse | { error: string }>) => {
   try {
     const { username, password } = req.body
     console.log('注册尝试:', username)
 
     if (username && password) {
       const fakeToken = 'turtle-soup-token-' + Date.now()
-      const registerResponse = {
+      const registerResponse: RegisterResponse = {
         access_token: fakeToken,
         user: {
           id: Date.now(),
@@ -122,7 +167,7 @@ app.post('/api/auth/register', (req, res) => {
     } else {
       res.status(400).json({ error: '用户名和密码不能为空' })
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('注册请求失败:', error.message)
     res.status(500).json({ error: '注册请求失败' })
   }
