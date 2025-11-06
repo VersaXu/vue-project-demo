@@ -1,0 +1,41 @@
+{
+  "name": "turtle-soup",
+  "version": "1.0.0",
+  "description": "海龟汤问答游戏",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "echo '暂无lint配置' && exit 0",
+    "test": "echo '暂无测试配置' && exit 0"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "pinia": "^2.1.7",
+    "vue": "^3.3.8",
+    "vue-router": "^4.2.5"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.4.1",
+    "typescript": "^5.2.2",
+    "vite": "^4.5.0",
+    "vue-tsc": "^1.8.22"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VersaXu/Turtle-Soup.git"
+  },
+  "keywords": [
+    "vue",
+    "puzzle",
+    "game",
+    "turtle-soup"
+  ],
+  "author": "VersaXu",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/VersaXu/Turtle-Soup/issues"
+  },
+  "homepage": "https://github.com/VersaXu/Turtle-Soup#readme"
+}
