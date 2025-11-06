@@ -7,22 +7,6 @@
     }
   ],
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "turtle-soup-server.js" }
-  ],
-  "env": {
-    "QWEN_API_KEY": "@qwen_api_key",
-    "QWEN_BASE_URL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "QWEN_MODEL": "qwen-turbo"
-  },
-  "headers": [
-    {
-      "source": "/api/(.*)",
-      "headers": [
-        { "key": "Access-Control-Allow-Credentials", "value": "true" },
-        { "key": "Access-Control-Allow-Origin", "value": "https://versaxu.github.io" },
-        { "key": "Access-Control-Allow-Methods", "value": "GET,OPTIONS,PATCH,DELETE,POST,PUT" },
-        { "key": "Access-Control-Allow-Headers", "value": "X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization" }
-      ]
-    }
+    { "source": "/api/(.*)", "destination": "/turtle-soup-server.js" }
   ]
 }
